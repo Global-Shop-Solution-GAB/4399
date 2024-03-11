@@ -1,0 +1,266 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+	'ERM
+	'Quote 3348
+	'03/05/2012
+	
+	'Added a change on 2/18/2015 by SKC
+	'The change will left pad the employee number with zeros so it will now match the format in the table.
+	
+	'BN added, Mar 2, 2017: The program will not care about the hours display in the Hour textbox. Instead, it cares about the day-off taken, then multiply by 8 to get the hours-off.
+	
+	F.ODBC.Connection!con.OpenCompanyConnection
+	
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		'---------------------Pre Save hook ----------------------------------------	
+		F.Intrinsic.Control.Case(25730)
+			F.Intrinsic.Control.CallSub(Save)
+			
+		'--------------------Pre Delete hook ---------------------------------------
+		F.Intrinsic.Control.Case(25750)
+		F.Intrinsic.Control.CallSub(Delete)
+			
+	F.Intrinsic.Control.EndSelect
+	
+	F.Intrinsic.Control.CallSub(UnLoad)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(CatchError,"Sub",V.Ambient.CurrentSubroutine,"Error",V.Ambient.ErrorNumber,"ErrorDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Save.Start
+F.Intrinsic.Control.Try
+	V.Local.sSQL.Declare(String)
+	V.Local.sEmployee.Declare(String)
+	V.Local.sType.Declare(String)
+	V.Local.sHour.Declare(String)
+	V.Local.sCheck.Declare(String)
+	V.Local.sMinute.Declare(String)
+	V.Local.sDate.Declare(String)
+	V.Local.sTIn.Declare(String)
+	V.Local.sTOut.Declare(String)
+	V.Local.sTemp.Declare(String)
+	V.Local.dCharge.Declare(Date)
+	V.Local.dTin.Declare(Date)
+	V.Local.dTOut.Declare(Date)
+	V.Local.dIn.Declare(Date)
+	V.Local.dOut.Declare(Date)
+	V.Local.dCheckIn.Declare(Date)
+	V.Local.dCheckOut.Declare(Date)
+	V.Local.iSplit.Declare(Long)
+	V.Local.fTime.Declare(Float)
+	
+	'ex: 00001
+	V.Local.sEmployee.Set(V.Passed.000096)
+	'ex: 02-SICK
+	V.Local.sType.Set(V.Passed.000072)
+	'ex: 57
+	V.Local.sHour.Set(V.Passed.000163)
+	'ex: ""
+	V.Local.sMinute.Set(V.Passed.000166)
+	
+	V.Local.sDate.Set("000000")
+	
+	v.Local.iDateTaken.Declare(long)
+	
+	'------------------------------------Changed 2/18/15------------------------------------------------------
+	'This will left pad the employee number with zeros so it will match format in table
+	F.Intrinsic.String.LPad(V.Local.sEmployee,"0",5,V.Local.sEmployee)
+	
+	'creating start time
+	'ex: 8
+	F.Intrinsic.String.LPad(V.Passed.000004,"0",2,V.Local.sTIn)
+	'ex: ""
+	F.Intrinsic.String.LPad(V.Passed.000150,"0",2,V.Local.sTemp)
+	
+	F.Intrinsic.String.Concat(V.Local.sTIn,V.Local.sTemp,"00",V.Local.sTIn)
+	
+	'creating end time
+	'ex: 17
+	F.Intrinsic.String.LPad(V.Passed.000089,"0",2,V.Local.sTOut)
+	'ex: ""
+	F.Intrinsic.String.LPad(V.Passed.000091,"0",2,V.Local.sTemp)
+	
+	F.Intrinsic.String.Concat(V.Local.sTOut,V.Local.sTemp,"59",V.Local.sTOut)
+	
+	F.Intrinsic.Date.ConvertTString(V.Local.sTIn,"HH:NN.SS",V.Local.sTin)
+	F.Intrinsic.Date.ConvertTString(V.Local.sTOut,"HH:NN.SS",V.Local.sTOut)
+	
+	'ex: charge_date: 030317
+	F.Intrinsic.Date.ConvertDString(V.Passed.000162,"MMDDYY",V.Local.dCharge)
+	'ex: date_in: 030317
+	F.Intrinsic.Date.ConvertDString(V.Passed.000083,"MMDDYY",V.Local.dIn)
+	'ex: date_out: 030517
+	F.Intrinsic.Date.ConvertDString(V.Passed.000084,"MMDDYY",V.Local.dOut)
+	
+	'BN added, Mar 2, 2017
+	Function.Intrinsic.Date.WorkdaysBetweenDates(V.Local.dIn, V.Local.dOut, v.Local.iDateTaken)
+	
+	F.Intrinsic.Date.CombineDateTime(v.Local.dIn,v.Local.sTIn,v.Local.dIn)
+	F.Intrinsic.Date.CombineDateTime(v.Local.dOut,v.Local.sTOut,v.Local.dOut)
+	
+	'Customer wants to take everyday off multiply by 8 to get the Time
+	F.Intrinsic.Math.Mult(v.Local.iDateTaken,8,v.Local.fTime)
+	
+	'-------------------------Find employee and subtract hours from Vacation or sick hours left ---------------
+	'gets employee and charge date and combines date in with time in and date out with time out and compares to the entered information to make sure it is not within another time.
+	F.Intrinsic.String.Build("SELECT DATE_IN, TIME_IN, DATE_OUT, TIME_OUT FROM V_TIME_ATTENDANCE WHERE EMPLOYEE = '{0}' AND CHARGE_DATE = '{1}' ",V.Local.sEmployee,V.Local.dCharge.PervasiveDate,V.Local.sSQL)
+	F.ODBC.Connection!con.OpenLocalRecordsetRO("rstChk",V.Local.sSQL)
+	
+	F.Intrinsic.Control.If(V.ODBC.con!rstChk.EOF,=,False)
+	
+		V.Local.dTin.Set(V.ODBC.con!rstChk.FieldVal!DATE_IN)
+		V.Local.dTOut.Set(V.ODBC.con!rstChk.FieldVal!TIME_IN)
+		F.Intrinsic.Date.CombineDateTime(V.Local.dTin.DateComp,V.Local.dTOut.TimeComp,V.Local.dCheckIn)
+		
+		V.Local.dTin.Set(V.ODBC.con!rstChk.FieldVal!DATE_OUT)
+		V.Local.dTOut.Set(V.ODBC.con!rstChk.FieldVal!TIME_OUT)
+		F.Intrinsic.Date.CombineDateTime(v.Local.dTin.DateComp,V.Local.dTOut.TimeComp,v.Local.dCheckOut)
+		
+	F.Intrinsic.Control.EndIf
+	
+	F.ODBC.con!rstChk.Close
+	
+	F.Intrinsic.Control.If(V.Local.din,<,V.Local.dCheckIn,"or",V.Local.dIn,>,V.Local.dCheckOut)
+	F.Intrinsic.Control.AndIf(V.Local.dOut,<,V.Local.dCheckIn,"or",V.Local.dOut,>,V.Local.dCheckOut)
+	
+		F.Intrinsic.String.Concat("Select * From Employee_Mstr Where Employee = '",V.Local.sEmployee,"' and date_termination = '",V.Local.sDate,"'",V.Local.sSQL)
+		F.ODBC.Connection!con.OpenRecordsetRW("rst",V.Local.sSQL)
+		
+		F.Intrinsic.Control.If(V.ODBC.con!rst.EOF,=,False)
+		
+			F.Intrinsic.Control.If(V.Local.sType,=,"02-SICK")
+				F.Intrinsic.Math.Sub(V.ODBC.con!rst.FieldValFloat!SICK_LEFT,V.Local.fTime,V.Local.fTime)
+				F.ODBC.con!rst.Set!SICK_LEFT(V.Local.fTime)
+				
+			F.Intrinsic.Control.ElseIf(V.Local.sType,=,"03-VACATION")
+				F.Intrinsic.Math.Sub(V.ODBC.con!rst.FieldValFloat!VACATION_LEFT,V.Local.fTime,V.Local.fTime)
+				F.ODBC.con!rst.Set!VACATION_LEFT(V.Local.fTime)		
+				
+			F.Intrinsic.Control.EndIf
+			
+			F.ODBC.con!rst.Update
+			
+		F.Intrinsic.Control.EndIf
+		
+		F.ODBC.con!rst.Close
+		
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(CatchError,"Sub",V.Ambient.CurrentSubroutine,"Error",V.Ambient.ErrorNumber,"ErrorDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Save.End
+
+Program.Sub.Delete.Start
+F.Intrinsic.Control.Try
+	V.Local.sSQL.Declare(String)
+	V.Local.sEmployee.Declare(String)
+	V.Local.sType.Declare(String)
+	V.Local.sHour.Declare(String)
+	V.Local.sCheck.Declare(String)
+	V.Local.sMinute.Declare(String)
+	V.Local.dIn.Declare(Date)
+	V.Local.dOut.Declare(Date)
+	V.Local.fTime.Declare(Float)
+	v.Local.iDateTaken.Declare(long)
+	
+	V.Local.sEmployee.Set(V.Passed.000096)
+	V.Local.sType.Set(V.Passed.000072)
+	V.Local.sHour.Set(V.Passed.000163)
+	V.Local.sMinute.Set(V.Passed.000166)
+	
+	'---------------------------------Added change on 2/18/15------------------------------------------------------
+	'Left padded the employee number with 0's so it will match the table
+	F.Intrinsic.String.LPad(V.Local.sEmployee,"0",5,V.Local.sEmployee)
+	
+	'---------------The seconds are converted to two spaces so 9 seconds converts to 09 seconds-----------------------
+	F.Intrinsic.String.LPad(V.Local.sMinute,"0",2,V.Local.sMinute)
+	
+	'BN, Mar 2, 2017 added
+	'Customer wants to take everyday off multiply by 8 to get the Time
+	F.Intrinsic.Date.ConvertDString(V.Passed.000083,"MMDDYY",V.Local.dIn)
+	F.Intrinsic.Date.ConvertDString(V.Passed.000084,"MMDDYY",V.Local.dOut)
+	Function.Intrinsic.Date.WorkdaysBetweenDates(V.Local.dIn, V.Local.dOut, v.Local.iDateTaken)
+	f.Intrinsic.Math.Mult(v.Local.iDateTaken,8,v.Local.fTime)
+	
+	'-------------------------Find employee and add hours back to Vacation or sick hours left ------------------
+	F.Intrinsic.String.Concat("Select * From Employee_Mstr Where Employee = '",V.Local.sEmployee,"'",V.Local.sSQL)
+	F.ODBC.Connection!con.OpenRecordsetRW("rst",V.Local.sSQL)
+	
+	F.Intrinsic.Control.If(V.ODBC.con!rst.EOF,=,False)
+	
+		F.Intrinsic.Control.If(V.Local.sType,=,"02-SICK")
+			F.Intrinsic.Math.Add(V.ODBC.con!rst.FieldValFloat!SICK_LEFT,V.Local.fTime,V.Local.fTime)
+			F.ODBC.con!rst.Set!SICK_LEFT(V.Local.fTime)
+			
+		F.Intrinsic.Control.ElseIf(V.Local.sType,=,"03-VACATION")
+			F.Intrinsic.Math.Add(V.ODBC.con!rst.FieldValFloat!VACATION_LEFT,V.Local.fTime,V.Local.fTime)
+			F.ODBC.con!rst.Set!VACATION_LEFT(V.Local.fTime)
+			
+		F.Intrinsic.Control.EndIf
+		
+		F.ODBC.con!rst.Update
+		
+	F.Intrinsic.Control.EndIf
+	F.ODBC.con!rst.Close
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(CatchError,"Sub",V.Ambient.CurrentSubroutine,"Error",V.Ambient.ErrorNumber,"ErrorDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Delete.End
+
+Program.Sub.CatchError.Start
+F.Intrinsic.Control.Try
+	V.Local.sErrorMessage.Declare(String)
+	
+	F.Intrinsic.String.Build("Program: GCG_Vaca_Sick_Update.g2u{0}{0}Sub: {1}{0}Error: {2}{0}Error Description: {3}",V.Ambient.NewLine,V.Args.Sub,V.Args.Error,V.Args.ErrorDescription,V.Local.sErrorMessage)
+	F.Intrinsic.UI.Msgbox(V.Local.sErrorMessage,"Unhandled Error Occurred")
+	
+	F.Intrinsic.Control.If(V.Args.Sub.UCase,!=,"UNLOAD")
+		F.Intrinsic.Control.CallSub(UNLOAD)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.UI.Msgbox("Fatal Error occurred in program GCG_Vaca_Sick_Update.g2u","Unhandled Error Occurred")
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry	
+Program.Sub.CatchError.End
+
+Program.Sub.UnLoad.Start
+F.Intrinsic.Control.Try
+
+	F.Intrinsic.Control.If(V.ODBC.con.State,=,1)
+		F.ODBC.Connection!con.Close
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.End
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(CatchError, "Sub", V.Ambient.CurrentSubroutine, "ErrNo", V.Ambient.ErrorNumber, "ErrDesc", V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.UnLoad.End
+
+Program.Sub.Comments.Start
+${$0$}$GCG_VACA_SICK_UPDATE$}$ERIC$}$3/5/2012$}$False
+${$3$}$0$}$$}$-1$}$-1$}$$}$1/1/1900$}$This project was created for Kosmo Machine, Inc. on June of 2016.
+
+
+This is a custom GAB script that will display custom work order detail information. The information will be identical to the data from the work order detail grid in the standard GSS system however the user will not have the ability to browse via the ?Amount? column.
+The purpose of this is the customer has quoters/planners that would like to see this specific information and cannot do so with the Work Order (No Dollars) or WO Detail standard report.
+This GAB script is to run from the Work Order header screen. The script will check to see if the user is a part of the WODET security group. If they are not the ?Details? button will be disabled and the ?Script 1? button will be activated with the custom GAB script.
+Customer will need to set up the WODET security group prior to installation. Customer is responsible for setting up security for the standard work order screens if certain users are not to access it.
+
+**Note: Given the information on the custom grid, just as with the standard WO detail screen, given certain parameters pay for Labor may be calculated by users.
+Program.Sub.Comments.End
+
